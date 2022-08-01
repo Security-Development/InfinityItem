@@ -10,7 +10,6 @@
 
 namespace Neo;
 
-use Closure;
 use pocketmine\plugin\PluginBase;
 use pocketmine\event\Listener;
 use pocketmine\item\Durable;
@@ -20,35 +19,33 @@ use pocketmine\inventory\ArmorInventory;
 use pocketmine\inventory\transaction\action\SlotChangeAction;
 use pocketmine\item\Item;
 use pocketmine\scheduler\ClosureTask;
+use pocketmine\scheduler\TaskScheduler;
 
 class InfinityItem extends PluginBase {
 
     public function onEnable() : void {
         $this->getServer()->getPluginManager()->registerEvents(new class(($task = $this->getScheduler())) implements Listener { 
-            public function __construct(public $task){}
+            public function __construct(public TaskScheduler $task){}
 
-            public function TurnToInfinity(Item $item, Closure $function) : void {
+            public function TurnToInfinity(Item $item) : Item {
                 if( $item instanceof Durable ) {
-
                     $item->setUnbreakable();
-                    call_user_func($function, $item);
-
                 }
+                return $item;
 
             }
 
             public function onHandle(PlayerItemHeldEvent $event) : void {
-
                 $player = $event->getPlayer();
                 $slot = $event->getSlot();
+                $item = $event->getItem();
+                if( $item instanceof Durable ) {
+                    if( $item->isUnbreakable() ) // Recusive call Error Prevention
+                        return;
 
-                $this->TurnToInfinity(
-                    $event->getItem(),
-                    function($item) use($player, $slot) {
-                        $player->getInventory()->setItem($slot, $item);
-                    }
-                );
-
+                        $player->getInventory()->setItem($slot, $this->TurnToInfinity($item));
+                }
+     
             }
 
             public function onInventoryHandle(InventoryTransactionEvent $event) : void {
@@ -58,30 +55,13 @@ class InfinityItem extends PluginBase {
                 foreach($saction->getActions() as $action) {
                     
                     if( $action instanceof SlotChangeAction ) {
-                        
                         $inventory = $action->getInventory();
-
-                            $this->TurnToInfinity(
-                                $action->getTargetItem(),
-                                function($item) use($inventory, $action) {
-
-                                if( $inventory instanceof ArmorInventory ) {
-
-                                    $this->task->scheduleDelayedTask(new ClosureTask(
-                                        function() use(&$inventory, $action, $item) : void {
-    
-                                            $inventory->setItem($action->getSlot(), $item);
-    
-                                        }
-    
-                                    ), 1);
-
-
-                                 }
-            
-                            }
-
-                        );
+                        if( $inventory instanceof ArmorInventory ) {
+                            $this->task->scheduleDelayedTask(new ClosureTask(function () use($inventory, $action) :void {
+                                $inventory->setItem($action->getSlot(), $this->TurnToInfinity($action->getTargetItem()));
+                            }), 1);
+                           
+                        }
 
                     }
 
@@ -94,4 +74,3 @@ class InfinityItem extends PluginBase {
     }
 
 }
-?>
